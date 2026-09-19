@@ -1,0 +1,108 @@
+name: Build PickaxeDrillggg
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # 1. Checkout repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Java
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # 3. Extract ZIP in main/root directory
+      - name: Extract Source ZIP
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo "=== Before extraction ==="
+          ls -la
+
+          echo "Extracting PickaxeDrill-source.zip..."
+          unzip -q PickaxeDrill-source.zip
+
+          echo "=== After extraction ==="
+          ls -la
+
+      # 4. Enter PickaxeDrill folder
+      - name: Check PickaxeDrill Project
+        working-directory: PickaxeDrill
+        run: |
+          echo "Project directory:"
+          pwd
+
+          echo "=== Project files ==="
+          ls -la
+
+          echo "=== Gradle files ==="
+          ls -la build.gradle* settings.gradle* 2>/dev/null || true
+
+      # 5. Build
+      - name: Build PickaxeDrill
+        working-directory: PickaxeDrill
+        run: |
+          echo "Building PickaxeDrill..."
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew shadowJar --no-daemon
+          else
+            gradle shadowJar --no-daemon
+          fi
+
+      # 6. Find generated JAR
+      - name: Find Built JAR
+        id: jar
+        working-directory: PickaxeDrill
+        run: |
+          echo "=== Build output ==="
+          find build/libs -type f -name "*.jar" -print
+
+          JAR=$(find build/libs \
+            -type f \
+            -name "*.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" \
+            | head -n 1)
+
+          if [ -z "$JAR" ]; then
+            echo "ERROR: No JAR file found!"
+            exit 1
+          fi
+
+          echo "Selected JAR:"
+          echo "$JAR"
+
+          echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+
+      # 7. Upload artifact
+      - name: Upload JAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PickaxeDrill
+          path: PickaxeDrill/${{ steps.jar.outputs.jar }}
+
+      # 8. Create GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ github.run_number }}"
+          name: "PickaxeDrill Build ${{ github.run_number }}"
+          generate_release_notes: true
+          make_latest: true
+          files: PickaxeDrill/${{ steps.jar.outputs.jar }}

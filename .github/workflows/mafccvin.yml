@@ -1,0 +1,134 @@
+name: Build PickaxeDrill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      # Extract ZIP directly into repository root
+      - name: Extract Source
+        run: |
+          echo "=== Repository ==="
+          pwd
+          ls -la
+
+          echo "=== Extracting ZIP ==="
+          unzip -o PickaxeDrill-source.zip
+
+          echo "=== After extraction ==="
+          find . -maxdepth 4 -type f | sort
+
+      # Find the REAL Gradle root inside PickaxeDrill
+      - name: Find Gradle Project
+        id: project
+        run: |
+          echo "Searching for Gradle project..."
+
+          PROJECT=$(find . -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            -path "*/PickaxeDrill/*" \
+            -print -quit)
+
+          if [ -n "$PROJECT" ]; then
+            PROJECT_DIR=$(dirname "$PROJECT")
+          else
+            PROJECT=$(find . -type f \
+              \( -name "build.gradle.kts" -o -name "build.gradle" \) \
+              -path "*/PickaxeDrill/*" \
+              -print -quit)
+
+            if [ -z "$PROJECT" ]; then
+              echo "ERROR: Gradle project not found inside PickaxeDrill!"
+              echo "=== Directory tree ==="
+              find . -maxdepth 6 -type f | sort
+              exit 1
+            fi
+
+            PROJECT_DIR=$(dirname "$PROJECT")
+          fi
+
+          PROJECT_DIR=$(realpath "$PROJECT_DIR")
+
+          echo ""
+          echo "================================"
+          echo "Gradle project found:"
+          echo "$PROJECT_DIR"
+          echo "================================"
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      # Build from the detected directory
+      - name: Build PickaxeDrill
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          echo "================================"
+          echo "BUILD DIRECTORY"
+          pwd
+          echo "================================"
+
+          ls -la
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew shadowJar --no-daemon
+          else
+            gradle shadowJar --no-daemon
+          fi
+
+      # Find JAR
+      - name: Find JAR
+        id: jar
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: |
+          echo "=== Generated JARs ==="
+
+          find build/libs -type f -name "*.jar" -print
+
+          JAR=$(find build/libs \
+            -type f \
+            -name "*.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" \
+            | head -n 1)
+
+          if [ -z "$JAR" ]; then
+            echo "ERROR: No JAR found!"
+            exit 1
+          fi
+
+          echo "JAR found: $JAR"
+
+          echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+
+      # Upload artifact
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: PickaxeDrill
+          path: ${{ steps.project.outputs.project_dir }}/${{ steps.jar.outputs.jar }}
+
+      # Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ github.run_number }}"
+          name: "PickaxeDrill Build ${{ github.run_number }}"
+          generate_release_notes: true
+          make_latest: true
+          files: ${{ steps.project.outputs.project_dir }}/${{ steps.jar.outputs.jar }}

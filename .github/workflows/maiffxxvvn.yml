@@ -1,0 +1,122 @@
+name: Build PickaxeDrill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Prepare Project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Current directory:"
+          pwd
+
+          echo "Repository:"
+          ls -la
+
+          # Remove old extracted project if any
+          rm -rf PickaxeDrill
+
+          # Create project directory
+          mkdir -p PickaxeDrill
+
+          # Extract ZIP CONTENTS into PickaxeDrill
+          unzip -q PickaxeDrill-source.zip -d PickaxeDrill
+
+          echo ""
+          echo "=== Extracted structure ==="
+          find PickaxeDrill -maxdepth 3 -type f | sort
+
+          echo ""
+          echo "=== Gradle files ==="
+          ls -la PickaxeDrill/build.gradle.kts
+          ls -la PickaxeDrill/settings.gradle.kts
+
+      - name: Build
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT="$GITHUB_WORKSPACE/PickaxeDrill"
+
+          echo "========================================"
+          echo "BUILDING PROJECT"
+          echo "========================================"
+          echo "Project: $PROJECT"
+
+          cd "$PROJECT"
+
+          echo ""
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Checking Gradle files:"
+          test -f build.gradle.kts
+          test -f settings.gradle.kts
+
+          echo ""
+          echo "Running Gradle..."
+
+          gradle shadowJar --no-daemon
+
+      - name: Find JAR
+        id: jar
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT="$GITHUB_WORKSPACE/PickaxeDrill"
+
+          echo "=== Build output ==="
+          find "$PROJECT/build/libs" -type f -name "*.jar" -print
+
+          JAR=$(find "$PROJECT/build/libs" \
+            -type f \
+            -name "*.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" \
+            | head -n 1)
+
+          if [ -z "$JAR" ]; then
+            echo "ERROR: No JAR found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "JAR:"
+          echo "$JAR"
+
+          echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PickaxeDrill
+          path: ${{ steps.jar.outputs.jar }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ github.run_number }}"
+          name: "PickaxeDrill Build ${{ github.run_number }}"
+          generate_release_notes: true
+          make_latest: true
+          files: ${{ steps.jar.outputs.jar }}
